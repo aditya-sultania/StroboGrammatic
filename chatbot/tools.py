@@ -1,18 +1,20 @@
 from chatbot.data_tools import (
     dataset_statistics,
-    top_precursors,
+    find_incidents,
+    get_incident_by_id,
     top_activities,
+    top_precursors,
     top_barriers,
     top_life_saving_rules,
-    find_incidents,
 )
 
 
 SIF_TOOLS = [
     dataset_statistics,
-    top_precursors,
+    find_incidents,
+    get_incident_by_id,
     top_activities,
+    top_precursors,
     top_barriers,
     top_life_saving_rules,
-    find_incidents,
 ]

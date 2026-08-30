@@ -1,18 +1,26 @@
-import pandas as pd
-from pathlib import Path
 import math
+from pathlib import Path
+
+import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-# Load these once and keep them cached.
+# ============================================================
+# CACHED DATA
+# ============================================================
+
+_master = None
 _activity = None
 _lsr = None
 _precursor = None
 _barrier = None
-_master = None
 
+
+# ============================================================
+# LOAD DATA
+# ============================================================
 
 def load_master_data():
     global _master
@@ -24,6 +32,7 @@ def load_master_data():
         )
 
     return _master
+
 
 def load_data():
     global _activity, _lsr, _precursor, _barrier
@@ -51,180 +60,57 @@ def load_data():
     return _activity, _lsr, _precursor, _barrier
 
 
-def get_dataset_summary():
-    activity, lsr, precursor, barrier = load_data()
+# ============================================================
+# JSON-SAFE CLEANING
+# ============================================================
 
-    return {
-        "activities": activity.to_dict(orient="records"),
-        "life_saving_rules": lsr.to_dict(orient="records"),
-        "precursors": precursor.to_dict(orient="records"),
-        "barriers": barrier.to_dict(orient="records"),
-    }
-
-def search_incidents(
-    search_term: str,
-    limit: int = 10
-):
-
-    df = load_master_data()
-
-    search_term = search_term.lower().strip()
-
-    search_columns = [
-        "report_text",
-        "activity_group",
-        "precursor",
-        "life_saving_rule",
-        "job",
-        "outcome"
-    ]
-
-    available_columns = [
-        col for col in search_columns
-        if col in df.columns
-    ]
-
-    if not available_columns:
-        return []
-
-    mask = pd.Series(False, index=df.index)
-
-    for column in available_columns:
-        mask |= (
-            df[column]
-            .fillna("")
-            .astype(str)
-            .str.lower()
-            .str.contains(
-                search_term,
-                regex=False
-            )
-        )
-
-    results = df[mask].head(limit)
-
-    # Convert NaN / NaT / infinity into JSON-safe values
-    records = results.to_dict(orient="records")
-
-    cleaned_records = []
+def clean_records(records):
+    cleaned = []
 
     for record in records:
-
-        cleaned_record = {}
+        item = {}
 
         for key, value in record.items():
 
+            # Handle pandas missing values
             if pd.isna(value):
-                cleaned_record[key] = None
+                item[key] = None
 
+            # Handle infinity / -infinity
             elif isinstance(value, float) and not math.isfinite(value):
-                cleaned_record[key] = None
+                item[key] = None
+
+            # Convert numpy scalar values to normal Python values
+            elif hasattr(value, "item"):
+                try:
+                    item[key] = value.item()
+                except Exception:
+                    item[key] = value
 
             else:
-                cleaned_record[key] = value
+                item[key] = value
 
-        cleaned_records.append(cleaned_record)
+        cleaned.append(item)
 
-    return cleaned_records
-
-
-def get_top_precursors(
-    n: int = 5,
-    metric: str = "sif_density_pct"
-):
-    _, _, precursor, _ = load_data()
-
-    allowed_metrics = [
-        "sif_density_pct",
-        "sif_reports",
-        "total_reports"
-    ]
-
-    if metric not in allowed_metrics:
-        metric = "sif_density_pct"
-
-    result = (
-        precursor
-        .sort_values(metric, ascending=False)
-        .head(n)
-    )
-
-    return result.to_dict(orient="records")
+    return cleaned
 
 
-def get_top_activities(
-    n: int = 5,
-    metric: str = "sif_density_pct"
-):
-    activity, _, _, _ = load_data()
+# ============================================================
+# 1. DATASET STATISTICS
+# ============================================================
 
-    allowed_metrics = [
-        "sif_density_pct",
-        "sif_reports",
-        "total_reports"
-    ]
+def dataset_statistics():
+    """
+    Return overall statistics for the OIL SIF dataset.
 
-    if metric not in allowed_metrics:
-        metric = "sif_density_pct"
+    Includes:
+    - total reports
+    - SIF Potential reports
+    - Non-SIF Potential reports
+    - SIF percentage
+    - average SIF probability
+    """
 
-    result = (
-        activity
-        .sort_values(metric, ascending=False)
-        .head(n)
-    )
-
-    return result.to_dict(orient="records")
-
-
-def get_top_barriers(
-    n: int = 5,
-    metric: str = "sif_density_pct"
-):
-    _, _, _, barrier = load_data()
-
-    allowed_metrics = [
-        "sif_density_pct",
-        "sif_reports",
-        "total_reports"
-    ]
-
-    if metric not in allowed_metrics:
-        metric = "sif_density_pct"
-
-    result = (
-        barrier
-        .sort_values(metric, ascending=False)
-        .head(n)
-    )
-
-    return result.to_dict(orient="records")
-
-
-def get_top_lsr(
-    n: int = 5,
-    metric: str = "sif_density_pct"
-):
-    _, lsr, _, _ = load_data()
-
-    allowed_metrics = [
-        "sif_density_pct",
-        "sif_reports",
-        "total_reports"
-    ]
-
-    if metric not in allowed_metrics:
-        metric = "sif_density_pct"
-
-    result = (
-        lsr
-        .sort_values(metric, ascending=False)
-        .head(n)
-    )
-
-    return result.to_dict(orient="records")
-
-
-def get_sif_statistics():
     df = load_master_data()
 
     total_reports = len(df)
@@ -234,106 +120,326 @@ def get_sif_statistics():
     }
 
     if "sif_prediction" in df.columns:
+
         counts = (
             df["sif_prediction"]
-            .value_counts(dropna=False)
-            .to_dict()
+            .fillna("")
+            .astype(str)
+            .value_counts()
         )
 
-        sif_count = int(counts.get("SIF Potential", 0))
-        non_sif_count = int(counts.get("Non-SIF Potential", 0))
+        sif_count = int(
+            counts.get("SIF Potential", 0)
+        )
+
+        non_sif_count = int(
+            counts.get("Non-SIF Potential", 0)
+        )
 
         result["sif_potential"] = sif_count
         result["non_sif_potential"] = non_sif_count
 
         if total_reports > 0:
             result["sif_percentage"] = round(
-                (sif_count / total_reports) * 100,
+                sif_count / total_reports * 100,
                 2
             )
+        else:
+            result["sif_percentage"] = 0.0
 
     if "sif_probability" in df.columns:
+
         probabilities = pd.to_numeric(
             df["sif_probability"],
             errors="coerce"
         )
 
-        result["average_sif_probability"] = round(
-            float(probabilities.mean()),
-            4
-        )
+        mean_probability = probabilities.mean()
+
+        if pd.isna(mean_probability):
+            result["average_sif_probability"] = None
+        else:
+            result["average_sif_probability"] = round(
+                float(mean_probability),
+                4
+            )
 
     return result
 
-def dataset_statistics():
-    return get_sif_statistics()
 
+# ============================================================
+# 2. FIND INCIDENTS
+# ============================================================
 
-def top_precursors(n: int, metric: str):
-    return get_top_precursors(n, metric)
+def find_incidents(
+    search_term: str,
+    limit: int = 10
+):
+    """
+    Find incidents related to a concept in the dataset.
 
+    Gemini decides what concept to search for.
+    This function only performs the dataset search.
+    """
 
-def top_activities(n: int, metric: str):
-    return get_top_activities(n, metric)
+    if not search_term:
+        return []
 
+    df = load_master_data()
 
-def top_barriers(n: int, metric: str):
-    return get_top_barriers(n, metric)
+    search_term = str(search_term).strip().lower()
 
+    if not search_term:
+        return []
 
-def top_life_saving_rules(n: int, metric: str):
-    return get_top_lsr(n, metric)
+    # Prevent unreasonable tool requests
+    limit = max(1, min(int(limit), 50))
 
+    searchable_columns = [
+        "report_text",
+        "activity_group",
+        "precursor",
+        "life_saving_rule",
+        "job",
+        "outcome"
+    ]
 
-def find_incidents(search_term: str, limit: int):
-    return search_incidents(
-        search_term,
-        limit
+    searchable_columns = [
+        column
+        for column in searchable_columns
+        if column in df.columns
+    ]
+
+    if not searchable_columns:
+        return []
+
+    mask = pd.Series(
+        False,
+        index=df.index
+    )
+
+    for column in searchable_columns:
+
+        values = (
+            df[column]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+        )
+
+        mask |= values.str.contains(
+            search_term,
+            regex=False
+        )
+
+    results = (
+        df[mask]
+        .head(limit)
+    )
+
+    return clean_records(
+        results.to_dict(
+            orient="records"
+        )
     )
 
 
-def get_incident_by_id(report_id: str):
+# ============================================================
+# 3. GET INCIDENT BY REPORT ID
+# ============================================================
+
+def get_incident_by_id(
+    report_id: str
+):
+    """
+    Return a specific incident using its report ID.
+    """
+
+    if not report_id:
+        return {
+            "found": False,
+            "report_id": None
+        }
+
     df = load_master_data()
 
-    # Find the report ID column
-    id_column = None
+    report_id = (
+        str(report_id)
+        .strip()
+        .upper()
+    )
 
-    for column in [
-        "report_id",
-        "Report ID",
-        "reportid",
-        "id",
-        "ID"
-    ]:
-        if column in df.columns:
-            id_column = column
-            break
+    if "report_id" not in df.columns:
+        return {
+            "found": False,
+            "report_id": report_id,
+            "error": "report_id column not found"
+        }
 
-    if id_column is None:
-        return None
-
-    result = df[
-        df[id_column]
+    ids = (
+        df["report_id"]
+        .fillna("")
         .astype(str)
         .str.strip()
         .str.upper()
-        == report_id.strip().upper()
-    ]
+    )
+
+    result = df[ids == report_id]
 
     if result.empty:
-        return None
+        return {
+            "found": False,
+            "report_id": report_id
+        }
 
-    record = result.iloc[0].to_dict()
+    return {
+        "found": True,
+        "report": clean_records(
+            result.head(1).to_dict(
+                orient="records"
+            )
+        )[0]
+    }
 
-    # Make the record safe to work with
-    cleaned = {}
 
-    for key, value in record.items():
+# ============================================================
+# GENERIC RANKING HELPER
+# ============================================================
 
-        if pd.isna(value):
-            cleaned[key] = None
+def _ranking(
+    dataframe,
+    n: int,
+    metric: str
+):
+    allowed_metrics = {
+        "sif_density_pct",
+        "sif_reports",
+        "total_reports"
+    }
 
-        else:
-            cleaned[key] = value
+    if metric not in allowed_metrics:
+        metric = "sif_density_pct"
 
-    return cleaned
+    if metric not in dataframe.columns:
+        return []
+
+    n = max(1, min(int(n), 20))
+
+    result = (
+        dataframe
+        .sort_values(
+            metric,
+            ascending=False
+        )
+        .head(n)
+    )
+
+    return clean_records(
+        result.to_dict(
+            orient="records"
+        )
+    )
+
+
+# ============================================================
+# 4. TOP ACTIVITIES
+# ============================================================
+
+def top_activities(
+    n: int = 5,
+    metric: str = "sif_density_pct"
+):
+    """
+    Return the top activity groups.
+
+    metric can be:
+    - sif_density_pct
+    - sif_reports
+    - total_reports
+    """
+
+    activity, _, _, _ = load_data()
+
+    return _ranking(
+        activity,
+        n,
+        metric
+    )
+
+
+# ============================================================
+# 5. TOP PRECURSORS
+# ============================================================
+
+def top_precursors(
+    n: int = 5,
+    metric: str = "sif_density_pct"
+):
+    """
+    Return the top precursor categories.
+
+    metric can be:
+    - sif_density_pct
+    - sif_reports
+    - total_reports
+    """
+
+    _, _, precursor, _ = load_data()
+
+    return _ranking(
+        precursor,
+        n,
+        metric
+    )
+
+
+# ============================================================
+# 6. TOP BARRIERS
+# ============================================================
+
+def top_barriers(
+    n: int = 5,
+    metric: str = "sif_density_pct"
+):
+    """
+    Return the top barrier themes.
+
+    metric can be:
+    - sif_density_pct
+    - sif_reports
+    - total_reports
+    """
+
+    _, _, _, barrier = load_data()
+
+    return _ranking(
+        barrier,
+        n,
+        metric
+    )
+
+
+# ============================================================
+# 7. TOP LIFE-SAVING RULES
+# ============================================================
+
+def top_life_saving_rules(
+    n: int = 5,
+    metric: str = "sif_density_pct"
+):
+    """
+    Return the top Life-Saving Rules.
+
+    metric can be:
+    - sif_density_pct
+    - sif_reports
+    - total_reports
+    """
+
+    _, lsr, _, _ = load_data()
+
+    return _ranking(
+        lsr,
+        n,
+        metric
+    )

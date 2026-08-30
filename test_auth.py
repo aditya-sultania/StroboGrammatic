@@ -10,7 +10,7 @@ client = genai.Client(
 
 response = client.models.generate_content(
     model="gemini-3.5-flash",
-    contents="Reply with exactly: GEMINI WORKS"
+    contents="Say exactly: GEMINI WORKS"
 )
 
 print(response.text)
