@@ -7,6 +7,7 @@ import streamlit as st
 import plotly.express as px
 
 from chatbot.assistant import answer_question
+from chatbot.auth import login, logout, get_role
 
 
 # ============================================================
@@ -460,6 +461,691 @@ def analyze(text):
         xai
     )
 
+# ============================================================
+# ROLE-SPECIFIC DASHBOARDS
+# ============================================================
+
+def employee_dashboard(master, lsr, pre):
+    """Simple safety dashboard for Employee / Worker users."""
+
+    st.title("🦺 Employee Safety Dashboard")
+    st.caption("Safety information and practical precautions")
+
+    # --------------------------------------------------------
+    # TOP SAFETY METRICS
+    # --------------------------------------------------------
+
+    a, b, c = st.columns(3)
+
+    a.metric(
+        "Safety Reports",
+        f"{len(master):,}"
+    )
+
+    if "sif_prediction" in master.columns:
+        non_sif = (
+            master["sif_prediction"] == "Non-SIF Potential"
+        ).sum()
+
+        a.metric(
+            "Reports Reviewed",
+            f"{non_sif:,}"
+        )
+
+    if "life_saving_rule" in master.columns:
+        top_rule = (
+            master["life_saving_rule"]
+            .dropna()
+            .astype(str)
+            .value_counts()
+            .index[0]
+            if not master["life_saving_rule"].dropna().empty
+            else "N/A"
+        )
+    else:
+        top_rule = "N/A"
+
+    b.metric(
+        "Top Life-Saving Rule",
+        top_rule
+    )
+
+    if "precursor" in master.columns:
+        top_hazard = (
+            master["precursor"]
+            .dropna()
+            .astype(str)
+            .value_counts()
+            .index[0]
+            if not master["precursor"].dropna().empty
+            else "N/A"
+        )
+    else:
+        top_hazard = "N/A"
+
+    c.metric(
+        "Common Hazard",
+        top_hazard
+    )
+
+    # --------------------------------------------------------
+    # RECENT SAFETY ALERTS
+    # --------------------------------------------------------
+
+    st.subheader("⚠️ Recent Safety Alerts")
+
+    if "report_text" in master.columns:
+
+        alerts = master[
+            ["report_id", "report_text"]
+        ].dropna(
+            subset=["report_text"]
+        ).tail(5)
+
+        for _, row in alerts.iloc[::-1].iterrows():
+
+            st.warning(
+                f"**Safety Alert — {row['report_id']}**\n\n"
+                f"{str(row['report_text'])[:400]}"
+            )
+
+    else:
+        st.info("No recent safety alerts available.")
+
+    # --------------------------------------------------------
+    # COMMON HAZARDS
+    # --------------------------------------------------------
+
+    st.subheader("⚠️ Common Hazards")
+
+    if "precursor" in master.columns:
+
+        hazards = (
+            master["precursor"]
+            .dropna()
+            .astype(str)
+            .value_counts()
+            .head(5)
+            .reset_index()
+        )
+
+        hazards.columns = [
+            "Hazard",
+            "Reports"
+        ]
+
+        st.dataframe(
+            hazards,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # --------------------------------------------------------
+    # LIFE-SAVING RULES
+    # --------------------------------------------------------
+
+    st.subheader("🛡️ Top Life-Saving Rules")
+
+    if not lsr.empty:
+
+        display_lsr = lsr.head(5)
+
+        st.dataframe(
+            display_lsr,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # --------------------------------------------------------
+    # SAFETY TRENDS
+    # --------------------------------------------------------
+
+    st.subheader("📈 Safety Trends")
+
+    if "date" in master.columns:
+
+        temp = master.copy()
+
+        temp["date"] = pd.to_datetime(
+            temp["date"],
+            errors="coerce"
+        )
+
+        temp = temp.dropna(
+            subset=["date"]
+        )
+
+        if not temp.empty:
+
+            trend = (
+                temp.groupby(
+                    temp["date"].dt.to_period("M")
+                )
+                .size()
+                .reset_index(name="Reports")
+            )
+
+            trend["date"] = (
+                trend["date"]
+                .astype(str)
+            )
+
+            st.line_chart(
+                trend.set_index("date")
+            )
+
+    else:
+        st.info(
+            "Date information is not available "
+            "for trend analysis."
+        )
+
+    # --------------------------------------------------------
+    # RECOMMENDED PRECAUTIONS
+    # --------------------------------------------------------
+
+    st.subheader("✅ Recommended Precautions")
+
+    precautions = [
+        "Verify energy isolation before starting maintenance.",
+        "Stay outside the line of fire of moving equipment and suspended loads.",
+        "Use the correct Life-Saving Rule for the task being performed.",
+        "Inspect equipment before operation.",
+        "Report unsafe conditions and recurring hazards to your supervisor."
+    ]
+
+    for precaution in precautions:
+        st.write("• " + precaution)
+
+
+def hse_dashboard(master, activity, lsr, pre, bar, queue):
+    """Full analytical dashboard for HSE Officers."""
+
+    st.title("🛡️ HSE Safety Intelligence Dashboard")
+    st.caption(
+        "Full SIF analytics, risk prioritization and incident intelligence"
+    )
+
+    tabs = st.tabs([
+        "Overview",
+        "SIF Risk",
+        "Activity Ranking",
+        "Life-Saving Rules",
+        "Precursors",
+        "Barrier Failures",
+        "XAI / Analyze",
+        "HSE Review Queue"
+    ])
+
+    # ========================================================
+    # OVERVIEW
+    # ========================================================
+
+    with tabs[0]:
+
+        a, b, c, d = st.columns(4)
+
+        a.metric(
+            "Reports",
+            f"{len(master):,}"
+        )
+
+        sif_count = (
+            master["sif_prediction"] == "SIF Potential"
+        ).sum()
+
+        b.metric(
+            "SIF Potential",
+            f"{sif_count:,}"
+        )
+
+        c.metric(
+            "SIF Density",
+            f"{100 * sif_count / len(master):.2f}%"
+        )
+
+        d.metric(
+            "HSE Review Queue",
+            f"{len(queue):,}"
+        )
+
+        risk = (
+            master["sif_prediction"]
+            .value_counts()
+            .reset_index()
+        )
+
+        risk.columns = [
+            "Prediction",
+            "Reports"
+        ]
+
+        st.plotly_chart(
+            px.pie(
+                risk,
+                names="Prediction",
+                values="Reports",
+                hole=.45
+            ),
+            use_container_width=True
+        )
+
+    # ========================================================
+    # SIF RISK
+    # ========================================================
+
+    with tabs[1]:
+
+        st.subheader("SIF Risk")
+
+        st.plotly_chart(
+            px.histogram(
+                master,
+                x="sif_probability",
+                nbins=30,
+                title="SIF Probability Distribution"
+            ),
+            use_container_width=True
+        )
+
+        columns = [
+            c for c in [
+                "report_id",
+                "sif_probability",
+                "sif_prediction",
+                "activity_group",
+                "precursor"
+            ]
+            if c in master.columns
+        ]
+
+        st.dataframe(
+            master[columns]
+            .sort_values(
+                "sif_probability",
+                ascending=False
+            )
+            .head(1000),
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # ========================================================
+    # ACTIVITY
+    # ========================================================
+
+    with tabs[2]:
+
+        st.subheader("Activity Ranking")
+
+        st.plotly_chart(
+            px.bar(
+                activity,
+                x="sif_density_pct",
+                y="activity_group",
+                orientation="h",
+                title="SIF Density by Activity"
+            ),
+            use_container_width=True
+        )
+
+        st.dataframe(
+            activity,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # ========================================================
+    # LIFE-SAVING RULES
+    # ========================================================
+
+    with tabs[3]:
+
+        st.subheader("IOGP Life-Saving Rules")
+
+        st.plotly_chart(
+            px.bar(
+                lsr,
+                x="sif_reports",
+                y="life_saving_rule",
+                orientation="h",
+                title="SIF Reports by Life-Saving Rule"
+            ),
+            use_container_width=True
+        )
+
+        st.dataframe(
+            lsr,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # ========================================================
+    # PRECURSORS
+    # ========================================================
+
+    with tabs[4]:
+
+        st.subheader("Recurring Precursor Patterns")
+
+        st.plotly_chart(
+            px.bar(
+                pre,
+                x="sif_reports",
+                y="precursor",
+                orientation="h",
+                title="SIF Reports by Precursor"
+            ),
+            use_container_width=True
+        )
+
+        st.dataframe(
+            pre,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # ========================================================
+    # BARRIERS
+    # ========================================================
+
+    with tabs[5]:
+
+        st.subheader("Barrier Failures")
+
+        st.plotly_chart(
+            px.bar(
+                bar,
+                x="sif_reports",
+                y="barrier_theme",
+                orientation="h",
+                title="SIF Reports by Barrier Theme"
+            ),
+            use_container_width=True
+        )
+
+        st.dataframe(
+            bar,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # ========================================================
+    # XAI
+    # ========================================================
+
+    with tabs[6]:
+
+        st.subheader(
+            "Explainable AI — Analyze Safety Report"
+        )
+
+        text = st.text_area(
+            "Safety Report",
+            height=180
+        )
+
+        if st.button(
+            "Analyze Report",
+            type="primary"
+        ):
+
+            if text.strip():
+
+                p, pred, hr, prs, acts, lsrs, lsrp, brs, xai = analyze(
+                    text
+                )
+
+                a, b, c = st.columns(3)
+
+                a.metric(
+                    "SIF Probability",
+                    f"{p * 100:.1f}%"
+                )
+
+                b.metric(
+                    "Prediction",
+                    pred
+                )
+
+                c.metric(
+                    "Review Level",
+                    review_level(p, hr)
+                )
+
+                if hr:
+                    st.warning(
+                        "High-risk mechanism detected: "
+                        + ", ".join(hr)
+                    )
+
+                st.write(
+                    "**Life-Saving Rule:** "
+                    + lsrp[0][0]
+                )
+
+                st.write(
+                    "**Precursors:** "
+                    + (
+                        ", ".join(prs)
+                        if prs
+                        else "None detected"
+                    )
+                )
+
+                st.write(
+                    "**Activity:** "
+                    + (
+                        ", ".join(acts)
+                        if acts
+                        else "None detected"
+                    )
+                )
+
+            else:
+
+                st.warning(
+                    "Enter a safety report."
+                )
+
+    # ========================================================
+    # HSE QUEUE
+    # ========================================================
+
+    with tabs[7]:
+
+        st.subheader(
+            "HSE Review Queue"
+        )
+
+        required = [
+            "report_id",
+            "sif_probability",
+            "sif_prediction",
+            "review_priority",
+            "hse_review_status",
+            "activity_group",
+            "precursor",
+            "life_saving_rule"
+        ]
+
+        available = [
+            c for c in required
+            if c in queue.columns
+        ]
+
+        st.dataframe(
+            queue[available].head(5000),
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+def management_dashboard(master, activity, pre, bar):
+    """High-level decision dashboard for Management."""
+
+    st.title("👔 Management Safety Dashboard")
+    st.caption(
+        "High-level SIF risk and decision intelligence"
+    )
+
+    # --------------------------------------------------------
+    # EXECUTIVE METRICS
+    # --------------------------------------------------------
+
+    a, b, c = st.columns(3)
+
+    a.metric(
+        "Total Reports",
+        f"{len(master):,}"
+    )
+
+    sif_count = (
+        master["sif_prediction"] == "SIF Potential"
+    ).sum()
+
+    b.metric(
+        "SIF-Potential Reports",
+        f"{sif_count:,}"
+    )
+
+    c.metric(
+        "SIF Density",
+        f"{100 * sif_count / len(master):.2f}%"
+    )
+
+    # --------------------------------------------------------
+    # ACTIVITY RISK
+    # --------------------------------------------------------
+
+    st.subheader(
+        "🔴 Risk by Activity"
+    )
+
+    if not activity.empty:
+
+        display = activity.copy()
+
+        def risk_label(value):
+
+            if value >= 50:
+                return "🔴 High"
+
+            elif value >= 25:
+                return "🟡 Moderate"
+
+            return "🟢 Low"
+
+        display["Risk Level"] = (
+            display["sif_density_pct"]
+            .apply(risk_label)
+        )
+
+        columns = [
+            c for c in [
+                "activity_group",
+                "sif_density_pct",
+                "sif_reports",
+                "total_reports",
+                "Risk Level"
+            ]
+            if c in display.columns
+        ]
+
+        st.dataframe(
+            display[columns],
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # --------------------------------------------------------
+    # TOP PRECURSORS
+    # --------------------------------------------------------
+
+    st.subheader(
+        "⚠️ Leading Safety Precursors"
+    )
+
+    st.dataframe(
+        pre.head(10),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # --------------------------------------------------------
+    # BARRIER FAILURES
+    # --------------------------------------------------------
+
+    st.subheader(
+        "🧱 Key Barrier Failure Themes"
+    )
+
+    st.dataframe(
+        bar.head(10),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # --------------------------------------------------------
+    # MANAGEMENT DRILL-DOWN
+    # --------------------------------------------------------
+
+    st.subheader(
+        "🔎 Risk Drill-Down"
+    )
+
+    if "activity_group" in master.columns:
+
+        selected_activity = st.selectbox(
+            "Select Activity",
+            sorted(
+                master["activity_group"]
+                .dropna()
+                .astype(str)
+                .unique()
+            )
+        )
+
+        filtered = master[
+            master["activity_group"]
+            .astype(str)
+            == selected_activity
+        ]
+
+        st.write(
+            f"**Activity:** {selected_activity}"
+        )
+
+        st.metric(
+            "Reports",
+            f"{len(filtered):,}"
+        )
+
+        if "sif_prediction" in filtered.columns:
+
+            st.metric(
+                "SIF-Potential Reports",
+                f"{(filtered['sif_prediction'] == 'SIF Potential').sum():,}"
+            )
+
+        if "precursor" in filtered.columns:
+
+            st.write(
+                "**Leading Hazards:**"
+            )
+
+            st.dataframe(
+                filtered[
+                    "precursor"
+                ]
+                .dropna()
+                .astype(str)
+                .value_counts()
+                .head(10)
+                .reset_index(),
+                use_container_width=True,
+                hide_index=True
+            )
 
 # ============================================================
 # STREAMLIT CONFIG
@@ -469,6 +1155,11 @@ st.set_page_config(
     page_title="OIL SIF Intelligence",
     layout="wide"
 )
+
+if not login():
+    st.stop()
+
+role = get_role()
 
 st.title(
     "🛡️ OIL SIF Precursor Intelligence"
@@ -515,625 +1206,671 @@ queue = pd.read_csv(
 # DASHBOARD TABS
 # ============================================================
 
-tabs = st.tabs(
-    [
-        "Overview",
-        "SIF Risk",
-        "Site / Activity Ranking",
-        "Life-Saving Rules",
-        "Precursors",
-        "Barrier Failures",
-        "XAI / Analyze",
-        "HSE Review Queue"
-    ]
-)
+# tabs = st.tabs(
+#     [
+#         "Overview",
+#         "SIF Risk",
+#         "Site / Activity Ranking",
+#         "Life-Saving Rules",
+#         "Precursors",
+#         "Barrier Failures",
+#         "XAI / Analyze",
+#         "HSE Review Queue"
+#     ]
+# )
 
+
+# # ============================================================
+# # OVERVIEW
+# # ============================================================
+
+# with tabs[0]:
+
+#     st.info(
+#         "Prototype uses public OSHA data. OIL site ranking requires "
+#         "OIL HSSE UA/UC, near-miss and incident data."
+#     )
+
+#     a, b, c, d = st.columns(4)
+
+#     a.metric(
+#         "Reports",
+#         f"{len(master):,}"
+#     )
+
+#     a = a
+
+#     b.metric(
+#         "SIF Potential",
+#         f"{(master.sif_prediction == 'SIF Potential').sum():,}"
+#     )
+
+#     c.metric(
+#         "SIF Density",
+#         f"{100 * (master.sif_prediction == 'SIF Potential').mean():.2f}%"
+#     )
+
+#     d.metric(
+#         "HSE Review Queue",
+#         f"{len(queue):,}"
+#     )
+
+#     st.subheader("Risk distribution")
+
+#     risk = (
+#         master.sif_prediction
+#         .value_counts()
+#         .reset_index()
+#     )
+
+#     risk.columns = [
+#         "Prediction",
+#         "Reports"
+#     ]
+
+#     st.plotly_chart(
+#         px.pie(
+#             risk,
+#             names="Prediction",
+#             values="Reports",
+#             hole=.45
+#         ),
+#         use_container_width=True
+#     )
+
+
+# # ============================================================
+# # SIF RISK
+# # ============================================================
+
+# with tabs[1]:
+
+#     st.subheader("SIF Risk")
+
+#     st.plotly_chart(
+#         px.histogram(
+#             master,
+#             x="sif_probability",
+#             nbins=30,
+#             title="SIF probability distribution"
+#         ),
+#         use_container_width=True
+#     )
+
+#     st.dataframe(
+#         master[
+#             [
+#                 "report_id",
+#                 "sif_probability",
+#                 "sif_prediction",
+#                 "activity_group",
+#                 "precursor"
+#             ]
+#         ]
+#         .sort_values(
+#             "sif_probability",
+#             ascending=False
+#         )
+#         .head(1000),
+#         use_container_width=True,
+#         hide_index=True
+#     )
+
+
+# # ============================================================
+# # ACTIVITY
+# # ============================================================
+
+# with tabs[2]:
+
+#     st.subheader("Activity ranking")
+
+#     st.plotly_chart(
+#         px.bar(
+#             activity,
+#             x="sif_density_pct",
+#             y="activity_group",
+#             orientation="h",
+#             title="SIF-precursor density by activity"
+#         ),
+#         use_container_width=True
+#     )
+
+#     st.caption(
+#         "Site ranking is disabled for public data because the "
+#         "dataset does not contain OIL's site hierarchy."
+#     )
+
+#     st.dataframe(
+#         activity,
+#         use_container_width=True,
+#         hide_index=True
+#     )
+
+
+# # ============================================================
+# # LIFE-SAVING RULES
+# # ============================================================
+
+# with tabs[3]:
+
+#     st.subheader(
+#         "IOGP Life-Saving Rules"
+#     )
+
+#     st.plotly_chart(
+#         px.bar(
+#             lsr,
+#             x="sif_reports",
+#             y="life_saving_rule",
+#             orientation="h",
+#             title="SIF-potential reports by Life-Saving Rule"
+#         ),
+#         use_container_width=True
+#     )
+
+#     st.dataframe(
+#         lsr,
+#         use_container_width=True,
+#         hide_index=True
+#     )
+
+
+# # ============================================================
+# # PRECURSORS
+# # ============================================================
+
+# with tabs[4]:
+
+#     st.subheader(
+#         "Recurring precursor patterns"
+#     )
+
+#     st.plotly_chart(
+#         px.bar(
+#             pre,
+#             x="sif_reports",
+#             y="precursor",
+#             orientation="h",
+#             title="SIF-potential reports by precursor"
+#         ),
+#         use_container_width=True
+#     )
+
+#     st.dataframe(
+#         pre,
+#         use_container_width=True,
+#         hide_index=True
+#     )
+
+
+# # ============================================================
+# # BARRIER FAILURES
+# # ============================================================
+
+# with tabs[5]:
+
+#     st.subheader(
+#         "Barrier failures"
+#     )
+
+#     st.plotly_chart(
+#         px.bar(
+#             bar,
+#             x="sif_reports",
+#             y="barrier_theme",
+#             orientation="h",
+#             title="SIF-potential reports by barrier-failure theme"
+#         ),
+#         use_container_width=True
+#     )
+
+#     st.dataframe(
+#         bar,
+#         use_container_width=True,
+#         hide_index=True
+#     )
+
+
+# # ============================================================
+# # XAI
+# # ============================================================
+
+# with tabs[6]:
+
+#     st.subheader(
+#         "Explainable AI — analyze one report"
+#     )
+
+#     sample = st.selectbox(
+#         "Example",
+#         [
+#             "Custom",
+#             "Worker entered a confined space without gas testing. "
+#             "Oxygen level was not checked.",
+
+#             "During excavation, the excavator bucket contacted an "
+#             "underground power cable.",
+
+#             "A suspended load moved unexpectedly and nearly struck "
+#             "a worker.",
+
+#             "Employee slipped on a wet office floor and sustained "
+#             "a minor bruise."
+#         ]
+#     )
+
+#     txt = st.text_area(
+#         "Safety report",
+#         "" if sample == "Custom" else sample,
+#         height=150
+#     )
+
+#     if st.button(
+#         "Analyze",
+#         type="primary"
+#     ):
+
+#         if txt.strip():
+
+#             (
+#                 probability,
+#                 prediction,
+#                 high_risk,
+#                 precursors,
+#                 activities,
+#                 lsr_matches,
+#                 lsr_predictions,
+#                 barriers,
+#                 xai
+#             ) = analyze(txt)
+
+#             positive_features, negative_features = xai
+
+#             review = review_level(
+#                 probability,
+#                 high_risk
+#             )
+
+#             why, findings, action = simple_explanation(
+#                 txt,
+#                 probability,
+#                 prediction,
+#                 high_risk,
+#                 precursors,
+#                 activities,
+#                 barriers,
+#                 lsr_predictions
+#             )
+
+#             a, b, c = st.columns(3)
+
+#             a.metric(
+#                 "SIF probability",
+#                 f"{probability * 100:.1f}%"
+#             )
+
+#             b.metric(
+#                 "Decision",
+#                 prediction
+#             )
+
+#             c.metric(
+#                 "Review",
+#                 review
+#             )
+
+#             st.subheader(
+#                 "🧠 Simple explanation"
+#             )
+
+#             st.info(why)
+
+#             if findings:
+
+#                 st.markdown(
+#                     "**What the system found:**"
+#                 )
+
+#                 for item in findings:
+#                     st.write(
+#                         "• " + item
+#                     )
+
+#             st.success(action)
+
+#             if high_risk:
+
+#                 st.warning(
+#                     "Safety backstop triggered: "
+#                     + ", ".join(high_risk)
+#                 )
+
+#             with st.expander(
+#                 "🔬 Technical XAI — model feature contributions"
+#             ):
+
+#                 st.caption(
+#                     "These are model-feature contributions, not proof "
+#                     "that a word caused the incident."
+#                 )
+
+#                 x, y = st.columns(2)
+
+#                 with x:
+
+#                     st.markdown(
+#                         "**Features pushing toward SIF**"
+#                     )
+
+#                     for key, value in positive_features:
+#                         st.write(
+#                             f"• `{key}` — {value:.4f}"
+#                         )
+
+#                 with y:
+
+#                     st.markdown(
+#                         "**Features pushing toward Non-SIF**"
+#                     )
+
+#                     for key, value in negative_features:
+#                         st.write(
+#                             f"• `{key}` — {value:.4f}"
+#                         )
+
+#             st.subheader(
+#                 "Life-Saving Rule"
+#             )
+
+#             st.write(
+#                 "**"
+#                 + lsr_predictions[0][0]
+#                 + "** — "
+#                 + f"{lsr_predictions[0][1] * 100:.1f}%"
+#             )
+
+#             st.caption(
+#                 "Top 3: "
+#                 + " • ".join(
+#                     f"{key} {value * 100:.1f}%"
+#                     for key, value in lsr_predictions
+#                 )
+#             )
+
+#             x, y = st.columns(2)
+
+#             with x:
+
+#                 st.write(
+#                     "**Precursors:** "
+#                     + (
+#                         ", ".join(precursors)
+#                         if precursors
+#                         else "None detected"
+#                     )
+#                 )
+
+#                 st.write(
+#                     "**Activity:** "
+#                     + (
+#                         ", ".join(activities)
+#                         if activities
+#                         else "None detected"
+#                     )
+#                 )
+
+#             with y:
+
+#                 st.write(
+#                     "**LSR keyword backstop:** "
+#                     + (
+#                         ", ".join(lsr_matches)
+#                         if lsr_matches
+#                         else "None"
+#                     )
+#                 )
+
+#                 st.write(
+#                     "**Barrier themes:** "
+#                     + (
+#                         ", ".join(barriers)
+#                         if barriers
+#                         else "None detected"
+#                     )
+#                 )
+
+#         else:
+
+#             st.warning(
+#                 "Enter a report."
+#             )
+
+
+# # ============================================================
+# # HSE REVIEW QUEUE
+# #============================================================
+
+# with tabs[7]:
+
+#     st.subheader(
+#         "HSE Review Queue"
+#     )
+
+#     st.write(
+#         "Medium-confidence reports are candidates for human review; "
+#         "high-probability reports are prioritized."
+#     )
+
+#     if "review_priority" not in queue.columns:
+
+#         queue["review_priority"] = pd.cut(
+#             queue["sif_probability"],
+#             bins=[
+#                 -0.001,
+#                 0.30,
+#                 0.70,
+#                 1.001
+#             ],
+#             labels=[
+#                 "Normal",
+#                 "HSE Review",
+#                 "High Priority"
+#             ]
+#         )
+
+#     if "hse_review_status" not in queue.columns:
+
+#         queue["hse_review_status"] = (
+#             queue["review_priority"]
+#             .astype(str)
+#             .map(
+#                 {
+#                     "Normal": "Not Queued",
+#                     "HSE Review": "Review Suggested",
+#                     "High Priority": "Pending HSE Review"
+#                 }
+#             )
+#         )
+
+#     required_cols = [
+#         "report_id",
+#         "sif_probability",
+#         "sif_prediction",
+#         "review_priority",
+#         "hse_review_status",
+#         "activity_group",
+#         "precursor",
+#         "life_saving_rule"
+#     ]
+
+#     available_cols = [
+#         column
+#         for column in required_cols
+#         if column in queue.columns
+#     ]
+
+#     st.dataframe(
+#         queue[available_cols].head(5000),
+#         use_container_width=True,
+#         hide_index=True
+#     )
 
 # ============================================================
-# OVERVIEW
+# ROLE-BASED DASHBOARD
 # ============================================================
 
-with tabs[0]:
+if role == "Employee / Worker":
 
-    st.info(
-        "Prototype uses public OSHA data. OIL site ranking requires "
-        "OIL HSSE UA/UC, near-miss and incident data."
-    )
-
-    a, b, c, d = st.columns(4)
-
-    a.metric(
-        "Reports",
-        f"{len(master):,}"
-    )
-
-    a = a
-
-    b.metric(
-        "SIF Potential",
-        f"{(master.sif_prediction == 'SIF Potential').sum():,}"
-    )
-
-    c.metric(
-        "SIF Density",
-        f"{100 * (master.sif_prediction == 'SIF Potential').mean():.2f}%"
-    )
-
-    d.metric(
-        "HSE Review Queue",
-        f"{len(queue):,}"
-    )
-
-    st.subheader("Risk distribution")
-
-    risk = (
-        master.sif_prediction
-        .value_counts()
-        .reset_index()
-    )
-
-    risk.columns = [
-        "Prediction",
-        "Reports"
-    ]
-
-    st.plotly_chart(
-        px.pie(
-            risk,
-            names="Prediction",
-            values="Reports",
-            hole=.45
-        ),
-        use_container_width=True
-    )
-
-
-# ============================================================
-# SIF RISK
-# ============================================================
-
-with tabs[1]:
-
-    st.subheader("SIF Risk")
-
-    st.plotly_chart(
-        px.histogram(
-            master,
-            x="sif_probability",
-            nbins=30,
-            title="SIF probability distribution"
-        ),
-        use_container_width=True
-    )
-
-    st.dataframe(
-        master[
-            [
-                "report_id",
-                "sif_probability",
-                "sif_prediction",
-                "activity_group",
-                "precursor"
-            ]
-        ]
-        .sort_values(
-            "sif_probability",
-            ascending=False
-        )
-        .head(1000),
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ============================================================
-# ACTIVITY
-# ============================================================
-
-with tabs[2]:
-
-    st.subheader("Activity ranking")
-
-    st.plotly_chart(
-        px.bar(
-            activity,
-            x="sif_density_pct",
-            y="activity_group",
-            orientation="h",
-            title="SIF-precursor density by activity"
-        ),
-        use_container_width=True
-    )
-
-    st.caption(
-        "Site ranking is disabled for public data because the "
-        "dataset does not contain OIL's site hierarchy."
-    )
-
-    st.dataframe(
-        activity,
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ============================================================
-# LIFE-SAVING RULES
-# ============================================================
-
-with tabs[3]:
-
-    st.subheader(
-        "IOGP Life-Saving Rules"
-    )
-
-    st.plotly_chart(
-        px.bar(
-            lsr,
-            x="sif_reports",
-            y="life_saving_rule",
-            orientation="h",
-            title="SIF-potential reports by Life-Saving Rule"
-        ),
-        use_container_width=True
-    )
-
-    st.dataframe(
+    employee_dashboard(
+        master,
         lsr,
-        use_container_width=True,
-        hide_index=True
+        pre
     )
 
+elif role == "HSE Officer":
 
-# ============================================================
-# PRECURSORS
-# ============================================================
-
-with tabs[4]:
-
-    st.subheader(
-        "Recurring precursor patterns"
-    )
-
-    st.plotly_chart(
-        px.bar(
-            pre,
-            x="sif_reports",
-            y="precursor",
-            orientation="h",
-            title="SIF-potential reports by precursor"
-        ),
-        use_container_width=True
-    )
-
-    st.dataframe(
+    hse_dashboard(
+        master,
+        activity,
+        lsr,
         pre,
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ============================================================
-# BARRIER FAILURES
-# ============================================================
-
-with tabs[5]:
-
-    st.subheader(
-        "Barrier failures"
-    )
-
-    st.plotly_chart(
-        px.bar(
-            bar,
-            x="sif_reports",
-            y="barrier_theme",
-            orientation="h",
-            title="SIF-potential reports by barrier-failure theme"
-        ),
-        use_container_width=True
-    )
-
-    st.dataframe(
         bar,
-        use_container_width=True,
-        hide_index=True
+        queue
     )
 
+elif role == "Management":
 
-# ============================================================
-# XAI
-# ============================================================
-
-with tabs[6]:
-
-    st.subheader(
-        "Explainable AI — analyze one report"
+    management_dashboard(
+        master,
+        activity,
+        pre,
+        bar
     )
-
-    sample = st.selectbox(
-        "Example",
-        [
-            "Custom",
-            "Worker entered a confined space without gas testing. "
-            "Oxygen level was not checked.",
-
-            "During excavation, the excavator bucket contacted an "
-            "underground power cable.",
-
-            "A suspended load moved unexpectedly and nearly struck "
-            "a worker.",
-
-            "Employee slipped on a wet office floor and sustained "
-            "a minor bruise."
-        ]
-    )
-
-    txt = st.text_area(
-        "Safety report",
-        "" if sample == "Custom" else sample,
-        height=150
-    )
-
-    if st.button(
-        "Analyze",
-        type="primary"
-    ):
-
-        if txt.strip():
-
-            (
-                probability,
-                prediction,
-                high_risk,
-                precursors,
-                activities,
-                lsr_matches,
-                lsr_predictions,
-                barriers,
-                xai
-            ) = analyze(txt)
-
-            positive_features, negative_features = xai
-
-            review = review_level(
-                probability,
-                high_risk
-            )
-
-            why, findings, action = simple_explanation(
-                txt,
-                probability,
-                prediction,
-                high_risk,
-                precursors,
-                activities,
-                barriers,
-                lsr_predictions
-            )
-
-            a, b, c = st.columns(3)
-
-            a.metric(
-                "SIF probability",
-                f"{probability * 100:.1f}%"
-            )
-
-            b.metric(
-                "Decision",
-                prediction
-            )
-
-            c.metric(
-                "Review",
-                review
-            )
-
-            st.subheader(
-                "🧠 Simple explanation"
-            )
-
-            st.info(why)
-
-            if findings:
-
-                st.markdown(
-                    "**What the system found:**"
-                )
-
-                for item in findings:
-                    st.write(
-                        "• " + item
-                    )
-
-            st.success(action)
-
-            if high_risk:
-
-                st.warning(
-                    "Safety backstop triggered: "
-                    + ", ".join(high_risk)
-                )
-
-            with st.expander(
-                "🔬 Technical XAI — model feature contributions"
-            ):
-
-                st.caption(
-                    "These are model-feature contributions, not proof "
-                    "that a word caused the incident."
-                )
-
-                x, y = st.columns(2)
-
-                with x:
-
-                    st.markdown(
-                        "**Features pushing toward SIF**"
-                    )
-
-                    for key, value in positive_features:
-                        st.write(
-                            f"• `{key}` — {value:.4f}"
-                        )
-
-                with y:
-
-                    st.markdown(
-                        "**Features pushing toward Non-SIF**"
-                    )
-
-                    for key, value in negative_features:
-                        st.write(
-                            f"• `{key}` — {value:.4f}"
-                        )
-
-            st.subheader(
-                "Life-Saving Rule"
-            )
-
-            st.write(
-                "**"
-                + lsr_predictions[0][0]
-                + "** — "
-                + f"{lsr_predictions[0][1] * 100:.1f}%"
-            )
-
-            st.caption(
-                "Top 3: "
-                + " • ".join(
-                    f"{key} {value * 100:.1f}%"
-                    for key, value in lsr_predictions
-                )
-            )
-
-            x, y = st.columns(2)
-
-            with x:
-
-                st.write(
-                    "**Precursors:** "
-                    + (
-                        ", ".join(precursors)
-                        if precursors
-                        else "None detected"
-                    )
-                )
-
-                st.write(
-                    "**Activity:** "
-                    + (
-                        ", ".join(activities)
-                        if activities
-                        else "None detected"
-                    )
-                )
-
-            with y:
-
-                st.write(
-                    "**LSR keyword backstop:** "
-                    + (
-                        ", ".join(lsr_matches)
-                        if lsr_matches
-                        else "None"
-                    )
-                )
-
-                st.write(
-                    "**Barrier themes:** "
-                    + (
-                        ", ".join(barriers)
-                        if barriers
-                        else "None detected"
-                    )
-                )
-
-        else:
-
-            st.warning(
-                "Enter a report."
-            )
-
-
-# ============================================================
-# HSE REVIEW QUEUE
-# ============================================================
-
-with tabs[7]:
-
-    st.subheader(
-        "HSE Review Queue"
-    )
-
-    st.write(
-        "Medium-confidence reports are candidates for human review; "
-        "high-probability reports are prioritized."
-    )
-
-    if "review_priority" not in queue.columns:
-
-        queue["review_priority"] = pd.cut(
-            queue["sif_probability"],
-            bins=[
-                -0.001,
-                0.30,
-                0.70,
-                1.001
-            ],
-            labels=[
-                "Normal",
-                "HSE Review",
-                "High Priority"
-            ]
-        )
-
-    if "hse_review_status" not in queue.columns:
-
-        queue["hse_review_status"] = (
-            queue["review_priority"]
-            .astype(str)
-            .map(
-                {
-                    "Normal": "Not Queued",
-                    "HSE Review": "Review Suggested",
-                    "High Priority": "Pending HSE Review"
-                }
-            )
-        )
-
-    required_cols = [
-        "report_id",
-        "sif_probability",
-        "sif_prediction",
-        "review_priority",
-        "hse_review_status",
-        "activity_group",
-        "precursor",
-        "life_saving_rule"
-    ]
-
-    available_cols = [
-        column
-        for column in required_cols
-        if column in queue.columns
-    ]
-
-    st.dataframe(
-        queue[available_cols].head(5000),
-        use_container_width=True,
-        hide_index=True
-    )
-
 
 # ============================================================
 # SIF ASSISTANT
 # ============================================================
 
+
 st.sidebar.markdown("---")
 
-st.sidebar.subheader(
-    "💬 SIF Assistant"
+st.sidebar.write(
+    f"👤 **{st.session_state.username}**"
 )
 
-st.sidebar.info(
-    "Ask questions about SIF incidents, "
-    "precursors, barriers, activities, "
-    "Life-Saving Rules and risk."
+st.sidebar.write(
+    f"Role: **{role}**"
 )
 
+if st.sidebar.button("Logout"):
+    logout()
 
-# ------------------------------------------------------------
-# Gemini chat session
-# ------------------------------------------------------------
+if role=="HSE Officer":
+    st.sidebar.markdown("---")
 
-if "gemini_chat" not in st.session_state:
-    st.session_state.gemini_chat = None
-
-
-# ------------------------------------------------------------
-# Visible conversation history
-# ------------------------------------------------------------
-
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-
-# ------------------------------------------------------------
-# Clear conversation
-# ------------------------------------------------------------
-
-if st.sidebar.button(
-    "🗑️ Clear Chat"
-):
-
-    st.session_state.chat_history = []
-    st.session_state.gemini_chat = None
-
-    st.rerun()
-
-
-# ------------------------------------------------------------
-# Display conversation
-# ------------------------------------------------------------
-
-for role, message in st.session_state.chat_history:
-
-    with st.chat_message(role):
-        st.markdown(message)
-
-
-# ------------------------------------------------------------
-# Chat input
-# ------------------------------------------------------------
-
-user_question = st.chat_input(
-    "Ask anything about SIF incidents, risks, precursors, barriers..."
-)
-
-
-if user_question:
-
-    # --------------------------------------------------------
-    # User message
-    # --------------------------------------------------------
-
-    st.session_state.chat_history.append(
-        (
-            "user",
-            user_question
-        )
+    st.sidebar.subheader(
+        "💬 SIF Assistant"
     )
 
-    with st.chat_message("user"):
-        st.markdown(user_question)
+    st.sidebar.info(
+        "Ask questions about SIF incidents, "
+        "precursors, barriers, activities, "
+        "Life-Saving Rules and risk."
+    )
 
-    # --------------------------------------------------------
-    # Gemini response
-    # --------------------------------------------------------
 
-    with st.chat_message("assistant"):
+    # ------------------------------------------------------------
+    # Gemini chat session
+    # ------------------------------------------------------------
 
-        with st.spinner(
-            "Analyzing..."
-        ):
+    if "gemini_chat" not in st.session_state:
+        st.session_state.gemini_chat = None
 
-            answer, new_chat = answer_question(
-                user_question,
-                st.session_state.gemini_chat
+
+    # ------------------------------------------------------------
+    # Visible conversation history
+    # ------------------------------------------------------------
+
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+
+    # ------------------------------------------------------------
+    # Clear conversation
+    # ------------------------------------------------------------
+
+    if st.sidebar.button(
+        "🗑️ Clear Chat"
+    ):
+
+        st.session_state.chat_history = []
+        st.session_state.gemini_chat = None
+
+        st.rerun()
+
+
+    # ------------------------------------------------------------
+    # Display conversation
+    # ------------------------------------------------------------
+
+    for role, message in st.session_state.chat_history:
+
+        with st.chat_message(role):
+            st.markdown(message)
+
+
+    # ------------------------------------------------------------
+    # Chat input
+    # ------------------------------------------------------------
+
+    user_question = st.chat_input(
+        "Ask anything about SIF incidents, risks, precursors, barriers..."
+    )
+
+
+    if user_question:
+
+        # --------------------------------------------------------
+        # User message
+        # --------------------------------------------------------
+
+        st.session_state.chat_history.append(
+            (
+                "user",
+                user_question
             )
-
-            st.session_state.gemini_chat = new_chat
-
-            st.markdown(answer)
-
-    # --------------------------------------------------------
-    # Store assistant response
-    # --------------------------------------------------------
-
-    st.session_state.chat_history.append(
-        (
-            "assistant",
-            answer
         )
-    )
+
+        with st.chat_message("user"):
+            st.markdown(user_question)
+
+        # --------------------------------------------------------
+        # Gemini response
+        # --------------------------------------------------------
+
+        with st.chat_message("assistant"):
+
+            with st.spinner(
+                "Analyzing..."
+            ):
+
+                answer, new_chat = answer_question(
+                    user_question,
+                    st.session_state.gemini_chat
+                )
+
+                st.session_state.gemini_chat = new_chat
+
+                st.markdown(answer)
+
+        # --------------------------------------------------------
+        # Store assistant response
+        # --------------------------------------------------------
+
+        st.session_state.chat_history.append(
+            (
+                "assistant",
+                answer
+            )
+        )
