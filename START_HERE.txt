@@ -1,0 +1,27 @@
+OIL SIF SENTINEL — START HERE
+
+1. Open this folder in VS Code.
+2. Open PowerShell in this folder.
+3. Create environment:
+   python -m venv venv
+4. Activate:
+   .\venv\Scripts\Activate.ps1
+5. If activation is blocked:
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   .\venv\Scripts\Activate.ps1
+6. Install:
+   pip install -r requirements.txt
+7. Start:
+   streamlit run app.py
+8. Open the displayed localhost URL.
+9. Use one of:
+   worker / worker123
+   hse / hse123
+   manager / manager123
+
+DATA LOCATION
+All three real supplied CSVs are already included under data/raw/.
+Do not put them inside venv/.
+
+IMPORTANT
+This pack is a standalone finalist-oriented prototype layer. To preserve the existing StroboGrammatic work, merge the src modules and role pages into the existing app rather than deleting your old modules blindly.

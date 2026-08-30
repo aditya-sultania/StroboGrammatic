@@ -1,3 +1,21 @@
-SIF_Dashboard_Master_v4.csv
-SIF_Dashboard_Full_ITA_Inference_v2.csv
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment / secrets
 .env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Large local datasets
+data/raw/*.csv
+data/processed/
+
+# OS / editor
+.DS_Store
+Thumbs.db
