@@ -1,0 +1,10 @@
+﻿rank,activity_group,total_reports,sif_reports,sif_density_pct,reliability
+1,Excavation,50,4,8.0,Low volume
+2,Electrical work,877,69,7.8677309007981755,More stable
+3,Mobile equipment / vehicles,39833,1783,4.476188085255943,More stable
+4,Machinery operation,13873,559,4.029409644633461,More stable
+5,Maintenance,14919,478,3.2039680943762985,More stable
+6,Material handling / lifting,73898,2211,2.991961893420661,More stable
+7,Working at height,38400,1134,2.953125,More stable
+8,Welding / hot work,7648,152,1.9874476987447698,More stable
+9,Other,177132,2195,1.2391888535103766,More stable
