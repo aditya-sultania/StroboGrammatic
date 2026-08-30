@@ -3,6 +3,9 @@ import re
 from pathlib import Path
 import joblib, pandas as pd, streamlit as st
 import plotly.express as px
+from chatbot.gemini_chat import ask_gemini
+from chatbot.data_tools import get_dataset_summary
+from chatbot.assistant import answer_question
 
 ROOT=Path(__file__).parent
 SIF_MODEL=joblib.load(ROOT/"SIF_Model_v4_DomainAware.joblib")
@@ -289,4 +292,50 @@ with tabs[7]:
         queue[available_cols].head(5000),
         use_container_width=True,
         hide_index=True
+    )
+# =========================
+# SIF CHATBOT
+# =========================
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("💬 SIF Assistant")
+
+st.sidebar.info(
+    "Ask questions about SIF incidents, "
+    "precursors, barriers, activities, "
+    "Life-Saving Rules and risk."
+)
+
+if st.sidebar.button("🗑️ Clear Chat"):
+    st.session_state.chat_history = []
+    st.rerun()
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# Display conversation
+for role, message in st.session_state.chat_history:
+    with st.chat_message(role):
+        st.markdown(message)
+
+# Chat input
+user_question = st.chat_input(
+    "Ask anything about SIF incidents, risks, precursors, barriers..."
+)
+
+if user_question:
+    st.session_state.chat_history.append(
+        ("user", user_question)
+    )
+
+    with st.chat_message("user"):
+        st.markdown(user_question)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Analyzing..."):
+            answer = answer_question(user_question)
+            st.markdown(answer)
+
+    st.session_state.chat_history.append(
+        ("assistant", answer)
     )
